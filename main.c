@@ -28,6 +28,7 @@ struct srd_session *srd_sess = NULL;
 
 static gboolean opt_version = FALSE;
 gint opt_loglevel = SR_LOG_WARN; /* Show errors+warnings by default. */
+gint opt_logopts = SR_LOG_NOOPTS; /* Show no date, time, etc. by default. */
 static gboolean opt_scan_devs = FALSE;
 gboolean opt_wait_trigger = FALSE;
 gchar *opt_input_file = NULL;
@@ -58,6 +59,8 @@ static GOptionEntry optargs[] = {
 			"Show version and support list", NULL},
 	{"loglevel", 'l', 0, G_OPTION_ARG_INT, &opt_loglevel,
 			"Set loglevel (5 is most verbose)", NULL},
+	{"logopts", 'L', 0, G_OPTION_ARG_INT, &opt_logopts,
+			"Set log options (5 is date, time + ms)", NULL},
 	{"driver", 'd', 0, G_OPTION_ARG_STRING, &opt_drv,
 			"The driver to use", NULL},
 	{"config", 'c', 0, G_OPTION_ARG_STRING, &opt_config,
@@ -208,6 +211,11 @@ int main(int argc, char **argv)
 	if (sr_log_loglevel_set(opt_loglevel) != SR_OK)
 		goto done;
 
+	/* Set the log options (date, time, ... to output) for libsigrok. */
+	if (sr_log_logopts_set(opt_logopts) != SR_OK)
+		goto done;
+
+	/* Init libsigrok */
 	if (sr_init(&sr_ctx) != SR_OK)
 		goto done;
 
