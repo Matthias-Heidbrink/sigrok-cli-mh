@@ -26,8 +26,19 @@ struct sr_context *sr_ctx = NULL;
 struct srd_session *srd_sess = NULL;
 #endif
 
+/** libsigrok log options. Values except SR_LOG_NOOPTS can be combined. */
+enum  logopts {
+	LOG_NOOPTS   =  0, /**< Disable logging options */
+	LOG_DATE     =  1, /**< Log date yyyymmdd before msg. */
+	LOG_TIME     =  2, /**< Log time hhmmss before msg. */
+	LOG_TIME_MS  =  4, /**< Log time + ms .nnn before msg. */
+	LOG_TIME_US  =  8, /**< Log time + µs .nnnnnn before msg. */
+	LOG_UTC      = 16, /**< Use UTC (GMT) for date and time, avoiding TZ and DST issues. */
+};
+
 static gboolean opt_version = FALSE;
 gint opt_loglevel = SR_LOG_WARN; /* Show errors+warnings by default. */
+gint opt_logopts = LOG_NOOPTS;  /* Show no date, time, etc. by default. */
 static gboolean opt_scan_devs = FALSE;
 gboolean opt_wait_trigger = FALSE;
 gchar *opt_input_file = NULL;
@@ -58,6 +69,8 @@ static GOptionEntry optargs[] = {
 			"Show version and support list", NULL},
 	{"loglevel", 'l', 0, G_OPTION_ARG_INT, &opt_loglevel,
 			"Set loglevel (5 is most verbose)", NULL},
+	{"logopts", 'L', 0, G_OPTION_ARG_INT, &opt_logopts,
+			"Set log options (5 is date, time + ms)", NULL},
 	{"driver", 'd', 0, G_OPTION_ARG_STRING, &opt_drv,
 			"The driver to use", NULL},
 	{"config", 'c', 0, G_OPTION_ARG_STRING, &opt_config,
@@ -106,7 +119,6 @@ static GOptionEntry optargs[] = {
 	{NULL, 0, 0, 0, NULL, NULL, NULL}
 };
 
-
 static void logger(const gchar *log_domain, GLogLevelFlags log_level,
 		   const gchar *message, gpointer cb_data)
 {
@@ -126,6 +138,76 @@ static void logger(const gchar *log_domain, GLogLevelFlags log_level,
 	if (log_level & (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL))
 		exit(1);
 
+}
+
+/** Logging function for libsigrok output.
+ */
+static int do_log(void *cb_data, int loglevel, const char *format, va_list args)
+{
+	char dt[30];
+	char fmt[256];
+	char *logdom;
+	int retc;
+
+	(void)cb_data;
+
+	/* Only output messages of at least the selected loglevel(s). */
+	if (loglevel > sr_log_loglevel_get())
+		return SR_OK;
+
+	retc = 0;
+
+	/* Prepare date/time stamp. */
+	dt[0] = '\0';
+	if (opt_logopts > 0) {
+		if (opt_logopts & (LOG_DATE | LOG_TIME | LOG_TIME_MS | LOG_TIME_US)) {
+			gint64 dt_us = g_get_real_time();
+			time_t dt_timet = (time_t) (dt_us / 1000000);
+			struct tm dt_tm;
+			gchar buf[30];
+	#ifdef G_OS_WIN32
+			if (opt_logopts & LOG_UTC) {
+				if (gmtime_s(&dt_tm, &dt_timet) != 0)
+					retc += fprintf(stderr, "gmtime_s() failed.\n");
+				/* Do not return on error to prevent being unable to output error msgs at all! */
+			}
+			else if (localtime_s(&dt_tm, &dt_timet) != 0)
+				retc += fprintf(stderr, "localtime_s() failed.\n");
+	#else
+			if (opt_logopts & LOG_UTC) {
+				if (!gmtime_r(&dt_timet, &dt_tm))
+					retc += fprintf(stderr, "gmtime_r() failed: %d %s\n", errno, strerror(errno));
+			}
+			else if (!localtime_r(&dt_timet, &dt_tm))
+				retc += fprintf(stderr, "localtime_r() failed: %d %s\n", errno, strerror(errno));
+	#endif
+			if (opt_logopts & LOG_DATE) {
+				strftime(buf, sizeof(buf), "%Y%m%d ", &dt_tm);
+				g_strlcat(dt, buf, sizeof(dt));
+			}
+			if (opt_logopts & (LOG_TIME | LOG_TIME_MS | LOG_TIME_US)) {
+				strftime(buf, sizeof(buf), "%H:%M:%S", &dt_tm);
+				g_strlcat(dt, buf, sizeof(dt));
+				if (opt_logopts & LOG_TIME_US)
+					snprintf(buf, sizeof(buf), ".%06u ", (guint) (dt_us % 1000000));
+				else if (opt_logopts & LOG_TIME_MS)
+					snprintf(buf, sizeof(buf), ".%03u ", (guint) ((dt_us / 1000) % 1000));
+				else /* Seconds resolution only */
+					g_strlcpy(buf, " ", sizeof(buf));
+				g_strlcat(dt, buf, sizeof(dt));
+			}
+		}
+	}
+
+	/* Prepare format string. */
+	logdom = sr_log_logdomain_get();
+	snprintf(fmt, sizeof(fmt), "%s%s%s\n", dt, logdom, format);
+	g_free(logdom);
+
+	/* Output */
+	retc += vfprintf(stderr, fmt, args);
+
+	return retc;
 }
 
 int select_channels(struct sr_dev_inst *sdi)
@@ -204,10 +286,17 @@ int main(int argc, char **argv)
 		goto done;
 	}
 
+	/* Setup the log function for libsigrok and libsigrokdecode. */
+	if (sr_log_callback_set(do_log, NULL) != SR_OK)
+		goto done;
+	if (srd_log_callback_set(do_log, NULL) != SR_OK)
+		goto done;
+
 	/* Set the loglevel (amount of messages to output) for libsigrok. */
 	if (sr_log_loglevel_set(opt_loglevel) != SR_OK)
 		goto done;
 
+	/* Init libsigrok */
 	if (sr_init(&sr_ctx) != SR_OK)
 		goto done;
 
