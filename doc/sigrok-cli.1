@@ -328,6 +328,22 @@ number, the more debug output will be printed. Valid loglevels are:
 .br
 \fB5\fP   Spew
 .TP
+.BR "\-L, \-\-logopts " <flags>
+Set log options for libsigrok and libsigrokdecode. The following flags
+are valid and can be combined, e.g. 5 for date and time with ms:
+.sp
+\fB0\fP   None (default)
+.br
+\fB1\fP   Precede messages with date YYYYMMDD
+.br
+\fB2\fP   Precede messages with time hh:mm:ss
+.br
+\fB4\fP   Precede messages with time + milliseconds .sss
+.br
+\fB8\fP   Precede messages with time + microseconds .ssssss
+.br
+\fB16\fP  Use UTC for date and time.
+.TP
 .B "\-\-show"
 .br
 Show information about the selected option. For example, to see options for a
